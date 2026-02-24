@@ -193,6 +193,7 @@ void LoggingDefaultWriteFn(const LoggingParams& params, const LoggingLevel level
         }
     }
 
+    // Colours come after the timestamp (unlike the journal markers, see above)
     if ((params.colour_ != LoggingColour::JOURNAL) && (prefix != NULL)) {
         len += std::snprintf(&output[len], sizeof(output) - len, "%s", prefix);
     }
@@ -250,9 +251,10 @@ LoggingParams::LoggingParams(
         s_defaults_init = true;
     }
 
-    // User wants us to decide...
+    // User wants us to decide. INVOCATION_ID is set by systemd and part of every unit's environment.
     if (colour_ == LoggingColour::AUTO) {
-        colour_ = (isatty(fileno(stderr)) == 1 ? LoggingColour::YES : LoggingColour::NO);
+        colour_ = (isatty(fileno(stderr)) == 1 ? LoggingColour::YES :  // clang-format off
+            (std::getenv("INVOCATION_ID") != nullptr ? LoggingColour::JOURNAL : LoggingColour::NO));  // clang-format on
     }
 }
 
@@ -356,6 +358,34 @@ void LoggingHexdump(
 
         ix += 16;
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+
+LoggingOstream::LoggingOstream(const LoggingLevel level) : str_{ &buf_ }
+{
+    buf_.level_ = level;
+}
+
+int LoggingOstream::StrBuf::sync()
+{
+    // Print each line
+    const auto& s = this->str();
+    std::size_t offs = 0;
+    std::size_t pos = 0;
+    while ((pos = s.find("\n", offs)) != std::string::npos) {
+        switch (level_) {  // clang-format off
+            case LoggingLevel::FATAL:   FATAL(  "%s", s.substr(offs, pos - offs).c_str()); break;
+            case LoggingLevel::ERROR:   ERROR(  "%s", s.substr(offs, pos - offs).c_str()); break;
+            case LoggingLevel::WARNING: WARNING("%s", s.substr(offs, pos - offs).c_str()); break;
+            case LoggingLevel::NOTICE:  NOTICE( "%s", s.substr(offs, pos - offs).c_str()); break;
+            case LoggingLevel::INFO:    INFO(   "%s", s.substr(offs, pos - offs).c_str()); break;
+            case LoggingLevel::DEBUG:   DEBUG(  "%s", s.substr(offs, pos - offs).c_str()); break;
+            case LoggingLevel::TRACE:   TRACE(  "%s", s.substr(offs, pos - offs).c_str()); break;
+            }  // clang-format on
+        offs = pos + 1;
+    }
+    return 0;
 }
 
 /* ****************************************************************************************************************** */
